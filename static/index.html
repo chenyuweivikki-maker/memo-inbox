@@ -47,6 +47,10 @@
   .nav-item.active { background: var(--active); color: #fff; font-weight: 600; }
   .nav-item .num { font-size: 12px; color: var(--ink-faint); }
   .nav-item.active .num { color: rgba(255,255,255,.7); }
+  .nav-item.dragging { opacity: .4; }
+  .nav-item.drag-over-up { border-top: 2px solid var(--ink); }
+  .nav-item.drag-over-down { border-bottom: 2px solid var(--ink); }
+
   .sidebar-footer { position:absolute; bottom:20px; left:12px; right:12px; font-size:11px; color:var(--ink-faint); padding:0 4px; }
   .export-btn {
     display:block; width:100%;
@@ -250,7 +254,7 @@ function renderNav() {
   allMemos.forEach(m => { counts[m.category] = (counts[m.category] || 0) + 1; });
   const cats = ["全部", ...categories];
   $("nav").innerHTML = cats.map(c => `
-    <div class="nav-item ${c === currentCat ? "active" : ""}" data-cat="${c}">
+    <div class="nav-item ${c === currentCat ? "active" : ""}" data-cat="${c}" ${c === "全部" ? "" : `draggable="true"`}>
       <span>${c}</span>
       <span class="num">${c === "全部" ? allMemos.length : (counts[c] || 0)}</span>
     </div>
@@ -446,6 +450,67 @@ $("nav").addEventListener("pointerdown", e => {
 });
 $("nav").addEventListener("pointerup", () => clearTimeout(longPressTimer));
 $("nav").addEventListener("pointerleave", () => clearTimeout(longPressTimer));
+
+
+// 拖拽排序（电脑端）
+let dragCat = null;
+$("nav").addEventListener("dragstart", e => {
+  const item = e.target.closest(".nav-item");
+  if (!item || item.dataset.cat === "全部") return;
+  dragCat = item.dataset.cat;
+  item.classList.add("dragging");
+  e.dataTransfer.effectAllowed = "move";
+  e.dataTransfer.setData("text/plain", dragCat);
+});
+$("nav").addEventListener("dragend", e => {
+  const item = e.target.closest(".nav-item");
+  if (item) item.classList.remove("dragging");
+  dragCat = null;
+  document.querySelectorAll(".nav-item").forEach(n => n.classList.remove("drag-over"));
+});
+$("nav").addEventListener("dragover", e => {
+  e.preventDefault();
+  const item = e.target.closest(".nav-item");
+  if (!item || !dragCat || item.dataset.cat === "全部" || item.dataset.cat === dragCat) return;
+  e.dataTransfer.dropEffect = "move";
+  // 用位置判断插到上/下
+  const rect = item.getBoundingClientRect();
+  const after = (e.clientY - rect.top) > rect.height / 2;
+  item.classList.remove("drag-over", "drag-over-up", "drag-over-down");
+  item.classList.add(after ? "drag-over-down" : "drag-over-up");
+});
+$("nav").addEventListener("dragleave", e => {
+  const item = e.target.closest(".nav-item");
+  if (item) item.classList.remove("drag-over", "drag-over-up", "drag-over-down");
+});
+$("nav").addEventListener("drop", async e => {
+  e.preventDefault();
+  const item = e.target.closest(".nav-item");
+  if (!item || !dragCat || item.dataset.cat === "全部") return;
+  const target = item.dataset.cat;
+  if (target === dragCat) return;
+  const rect = item.getBoundingClientRect();
+  const after = (e.clientY - rect.top) > rect.height / 2;
+  const idx = categories.indexOf(dragCat);
+  const tidx = categories.indexOf(target);
+  const newCats = [...categories];
+  newCats.splice(idx, 1);
+  const insertAt = newCats.indexOf(target) + (after ? 1 : 0);
+  newCats.splice(insertAt, 0, dragCat);
+  // 保存
+  try {
+    const res = await fetch("/api/categories/order", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ categories: newCats })
+    });
+    const data = await res.json();
+    if (data.error) { toast(data.error); return; }
+    await refreshAll();
+  } catch (err) {
+    toast("排序失败，稍后再试");
+  }
+});
 
 function showCatMenu(item, x, y) {
   closeCatMenu();
