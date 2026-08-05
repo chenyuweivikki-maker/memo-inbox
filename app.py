@@ -297,6 +297,36 @@ def api_delete(file: str):
     path.unlink()
     return {"ok": True}
 
+class MemoMove(BaseModel):
+    file: str
+    category: str
+
+
+@app.post("/api/memos/move")
+def api_move_memo(body: MemoMove):
+    """移动 memo 到其他分类：移动文件到新分类文件夹"""
+    rel = Path(body.file)
+    if rel.is_absolute() or ".." in rel.parts:
+        return JSONResponse({"error": "非法路径"}, status_code=400)
+    src = (MEMO_DIR / rel).resolve()
+    if not src.is_relative_to(MEMO_DIR.resolve()):
+        return JSONResponse({"error": "非法路径"}, status_code=400)
+    if not src.exists() or not src.is_file():
+        return JSONResponse({"error": "文件不存在"}, status_code=404)
+    new_cat = sanitize(body.category)
+    cats = load_categories()
+    if new_cat not in cats:
+        return JSONResponse({"error": "目标分类不存在"}, status_code=400)
+    dest_dir = MEMO_DIR / new_cat
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / src.name
+    n = 1
+    while dest.exists():
+        dest = dest_dir / f"{src.stem}-{n}{src.suffix}"
+        n += 1
+    src.rename(dest)
+    return {"ok": True, "file": str(dest.relative_to(MEMO_DIR)), "category": new_cat}
+
 
 @app.get("/api/export")
 def api_export(category: str = ""):
